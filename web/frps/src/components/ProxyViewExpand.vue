@@ -17,6 +17,9 @@
     <el-form-item label="Compression">
       <span>{{ row.compression }}</span>
     </el-form-item>
+    <el-form-item label="Intranet">
+      <span>{{ row.localIP }}:{{ row.localPort }}</span>
+    </el-form-item>
     <el-form-item label="Last Start">
       <span>{{ row.lastStartTime }}</span>
     </el-form-item>
@@ -52,6 +55,14 @@
         <span>{{ row.subdomain }}</span>
       </el-form-item>
     </div>
+    <div v-else-if="proxyType === 'sudp' || proxyType === 'stcp' || proxyType === 'xtcp'">
+      <el-form-item label="Secret Key">
+        <span>{{ row.secretKey }}</span>
+      </el-form-item>
+      <el-form-item label="Allow Users">
+        <span>{{ row.allowUsers }}</span>
+      </el-form-item>
+    </div>
     <div v-else>
       <el-form-item label="Addr">
         <span>{{ row.addr }}</span>
@@ -60,14 +71,14 @@
   </el-form>
 
   <div v-if="row.annotations && row.annotations.size > 0">
-  <el-divider />
-  <el-text class="title-text" size="large">Annotations</el-text>
-  <ul>
-    <li v-for="item in annotationsArray()">
-      <span class="annotation-key">{{ item.key }}</span>
-      <span>{{  item.value }}</span>
-    </li>
-  </ul>
+    <el-divider />
+    <el-text class="title-text" size="large">Annotations</el-text>
+    <ul>
+      <li v-for="item in annotationsArray()">
+        <span class="annotation-key">{{ item.key }}</span>
+        <span>{{  item.value }}</span>
+      </li>
+    </ul>
   </div>
 </template>
 
