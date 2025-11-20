@@ -130,6 +130,10 @@ type NewProxy struct {
 
 	// tcpmux
 	Multiplexer string `json:"multiplexer,omitempty"`
+
+	// 增加了localIP/Port,用于frpc向frps传递本地映射的IP和端口 Add by changliang 2024-2-6 15:00:06
+	LocalIP   string `json:"local_ip,omitempty"`
+	LocalPort int    `json:"local_port,omitempty"`
 }
 
 type NewProxyResp struct {
