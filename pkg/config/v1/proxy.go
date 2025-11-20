@@ -128,7 +128,7 @@ func (c *ProxyBaseConfig) GetBaseConfig() *ProxyBaseConfig {
 
 func (c *ProxyBaseConfig) Complete(namePrefix string) {
 	c.Name = lo.Ternary(namePrefix == "", "", namePrefix+".") + c.Name
-	c.LocalIP = util.EmptyOr(c.LocalIP, "127.0.0.1")
+	// c.LocalIP = util.EmptyOr(c.LocalIP, "127.0.0.1") // 原来的代码中把LocalIP为空字符串的重置成了127.0.0.1, 现在改成保留原来的空字符串，changliang 2024-2-20 13:44:47
 	c.Transport.BandwidthLimitMode = util.EmptyOr(c.Transport.BandwidthLimitMode, types.BandwidthLimitModeClient)
 
 	if c.Plugin.ClientPluginOptions != nil {
@@ -150,6 +150,10 @@ func (c *ProxyBaseConfig) MarshalToMsg(m *msg.NewProxy) {
 	m.GroupKey = c.LoadBalancer.GroupKey
 	m.Metas = c.Metadatas
 	m.Annotations = c.Annotations
+
+	// 本地IP和端口，发送给frps端，add by changliang 2024-2-6 16:00:44
+	m.LocalIP = c.LocalIP
+	m.LocalPort = c.LocalPort
 }
 
 func (c *ProxyBaseConfig) UnmarshalFromMsg(m *msg.NewProxy) {
@@ -167,6 +171,10 @@ func (c *ProxyBaseConfig) UnmarshalFromMsg(m *msg.NewProxy) {
 	c.LoadBalancer.GroupKey = m.GroupKey
 	c.Metadatas = m.Metas
 	c.Annotations = m.Annotations
+
+	// 解析frpc发送过来的消息，并将消息中的LocalIP和LocalPort记录下来， add by changliang 2024-2-6 16:06:22
+	c.LocalIP = m.LocalIP
+	c.LocalPort = m.LocalPort
 }
 
 type TypedProxyConfig struct {
