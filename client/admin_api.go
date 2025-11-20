@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/fatedier/frp/client/proxy"
+	"github.com/fatedier/frp/client/visitor"
 	"github.com/fatedier/frp/pkg/config"
 	"github.com/fatedier/frp/pkg/config/v1/validation"
 	httppkg "github.com/fatedier/frp/pkg/util/http"
@@ -158,6 +159,32 @@ func NewProxyStatusResp(status *proxy.WorkingStatus, serverAddr string) ProxySta
 	return psr
 }
 
+func NewVisitorStatusResp(status *visitor.Visitor) ProxyStatusResp {
+	psr := ProxyStatusResp{}
+	switch vis := (*status).(type) {
+	case *visitor.STCPVisitor:
+		cfg := vis.GetConfig()
+		psr.Name = cfg.Name
+		psr.Type = "visitor." + cfg.Type
+		psr.LocalAddr = fmt.Sprintf("%s:%d", cfg.BindAddr, cfg.BindPort)
+		psr.RemoteAddr = cfg.ServerName
+	case *visitor.XTCPVisitor:
+		cfg := vis.GetConfig()
+		psr.Name = cfg.Name
+		psr.Type = "visitor." + cfg.Type
+		psr.LocalAddr = fmt.Sprintf("%s:%d", cfg.BindAddr, cfg.BindPort)
+		psr.RemoteAddr = cfg.ServerName
+	case *visitor.SUDPVisitor:
+		cfg := vis.GetConfig()
+		psr.Name = cfg.Name
+		psr.Type = "visitor." + cfg.Type
+		psr.LocalAddr = fmt.Sprintf("%s:%d", cfg.BindAddr, cfg.BindPort)
+		psr.RemoteAddr = cfg.ServerName
+	}
+
+	return psr
+}
+
 // GET /api/status
 func (svr *Service) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	var (
@@ -182,6 +209,14 @@ func (svr *Service) apiStatus(w http.ResponseWriter, _ *http.Request) {
 	ps := ctl.pm.GetAllProxyStatus()
 	for _, status := range ps {
 		res[status.Type] = append(res[status.Type], NewProxyStatusResp(status, svr.common.ServerAddr))
+	}
+
+	// 获取visitor
+	vs := ctl.vm.GetAllVisitorStatus()
+	log.Infof("vs count:%d", len(vs))
+	for _, status := range vs {
+		vs := NewVisitorStatusResp(status)
+		res[vs.Type] = append(res[vs.Type], vs)
 	}
 
 	for _, arrs := range res {
