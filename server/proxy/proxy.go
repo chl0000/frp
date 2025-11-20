@@ -258,8 +258,11 @@ func (pxy *BaseProxy) handleUserTCPConnection(userConn net.Conn) {
 		})
 	}
 
-	xl.Debugf("join connections, workConn(l[%s] r[%s]) userConn(l[%s] r[%s])", workConn.LocalAddr().String(),
-		workConn.RemoteAddr().String(), userConn.LocalAddr().String(), userConn.RemoteAddr().String())
+	// xl.Debugf("join connections, workConn(l[%s] r[%s]) userConn(l[%s] r[%s])", workConn.LocalAddr().String(),
+	// 	workConn.RemoteAddr().String(), userConn.LocalAddr().String(), userConn.RemoteAddr().String())
+	// 在log中展示转发到内网的IP和端口, changliang 2024-2-20 14:11:12 ,将两行log合成一行 2025-1-2 15:28:43
+	xl.Debugf("join connections, workConn(l[%s] r[%s]) userConn(l[%s] r[%s]) -> forward to(%s:%d)", workConn.LocalAddr().String(),
+		workConn.RemoteAddr().String(), userConn.LocalAddr().String(), userConn.RemoteAddr().String(), cfg.ProxyBackend.LocalIP, cfg.ProxyBackend.LocalPort)
 
 	name := pxy.GetName()
 	proxyType := cfg.Type
