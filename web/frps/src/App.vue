@@ -3,7 +3,7 @@
     <header class="grid-content header-color">
       <div class="header-content">
         <div class="brand">
-          <a href="#">frp</a>
+          <a href="#">frp server</a>
         </div>
         <div class="dark-switch">
           <el-switch
@@ -42,6 +42,7 @@
               <el-menu-item index="/proxies/tcpmux">TCPMUX</el-menu-item>
               <el-menu-item index="/proxies/stcp">STCP</el-menu-item>
               <el-menu-item index="/proxies/sudp">SUDP</el-menu-item>
+              <el-menu-item index="/proxies/xtcp">XTCP</el-menu-item>
             </el-sub-menu>
             <el-menu-item index="">Help</el-menu-item>
           </el-menu>
