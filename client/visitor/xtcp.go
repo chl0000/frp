@@ -346,6 +346,10 @@ func (sv *XTCPVisitor) makeNatHole() {
 	}
 }
 
+func (sv *XTCPVisitor) GetConfig() *v1.XTCPVisitorConfig {
+	return sv.cfg
+}
+
 type TunnelSession interface {
 	Init(listenConn *net.UDPConn, raddr *net.UDPAddr) error
 	OpenConn(context.Context) (net.Conn, error)

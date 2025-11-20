@@ -153,3 +153,7 @@ func (sv *STCPVisitor) handleConn(userConn net.Conn) {
 
 	libio.Join(userConn, remote)
 }
+
+func (sv *STCPVisitor) GetConfig() *v1.STCPVisitorConfig {
+	return sv.cfg
+}

@@ -117,15 +117,15 @@ func (vm *Manager) startVisitor(cfg v1.VisitorConfigurer) (err error) {
 	name := cfg.GetBaseConfig().Name
 	visitor, err := NewVisitor(vm.ctx, cfg, vm.clientCfg, vm.helper)
 	if err != nil {
-		xl.Warnf("new visitor error: %v", err)
+		xl.Warnf("new visitor %v error: %v", name, err)
 		return
 	}
 	err = visitor.Run()
 	if err != nil {
-		xl.Warnf("start error: %v", err)
+		xl.Warnf("start %v error: %v", name, err)
 	} else {
 		vm.visitors[name] = visitor
-		xl.Infof("start visitor success")
+		xl.Infof("start visitor %v success", name)
 	}
 	return
 }
@@ -189,6 +189,17 @@ func (vm *Manager) TransferConn(name string, conn net.Conn) error {
 		return fmt.Errorf("visitor [%s] not found", name)
 	}
 	return v.AcceptConn(conn)
+}
+
+// 返回所有的visit
+func (vm *Manager) GetAllVisitorStatus() []*Visitor {
+	vs := make([]*Visitor, 0)
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	for _, vis := range vm.visitors {
+		vs = append(vs, &vis)
+	}
+	return vs
 }
 
 type visitorHelperImpl struct {

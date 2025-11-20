@@ -262,3 +262,7 @@ func (sv *SUDPVisitor) Close() {
 	close(sv.readCh)
 	close(sv.sendCh)
 }
+
+func (sv *SUDPVisitor) GetConfig() *v1.SUDPVisitorConfig {
+	return sv.cfg
+}
