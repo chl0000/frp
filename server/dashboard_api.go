@@ -167,10 +167,20 @@ type HTTPSOutConf struct {
 
 type STCPOutConf struct {
 	BaseOutConf
+	Secretkey  string   `json:"secretKey,omitempty"`
+	AllowUsers []string `json:"allowUsers,omitempty"`
+}
+
+type SUDPOutConf struct {
+	BaseOutConf
+	Secretkey  string   `json:"secretKey,omitempty"`
+	AllowUsers []string `json:"allowUsers,omitempty"`
 }
 
 type XTCPOutConf struct {
 	BaseOutConf
+	Secretkey  string   `json:"secretKey,omitempty"`
+	AllowUsers []string `json:"allowUsers,omitempty"`
 }
 
 func getConfByType(proxyType string) any {
@@ -187,6 +197,8 @@ func getConfByType(proxyType string) any {
 		return &HTTPSOutConf{}
 	case v1.ProxyTypeSTCP:
 		return &STCPOutConf{}
+	case v1.ProxyTypeSUDP:
+		return &SUDPOutConf{}
 	case v1.ProxyTypeXTCP:
 		return &XTCPOutConf{}
 	default:
