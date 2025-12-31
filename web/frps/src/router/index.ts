@@ -7,6 +7,8 @@ import ProxiesHTTPS from '../components/ProxiesHTTPS.vue'
 import ProxiesTCPMux from '../components/ProxiesTCPMux.vue'
 import ProxiesSTCP from '../components/ProxiesSTCP.vue'
 import ProxiesSUDP from '../components/ProxiesSUDP.vue'
+import ProxiesXTCP from '../components/ProxiesXTCP.vue'
+import ClientList from '../components/ClientList.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -50,6 +52,16 @@ const router = createRouter({
       path: '/proxies/sudp',
       name: 'ProxiesSUDP',
       component: ProxiesSUDP,
+    },
+    {
+      path: '/proxies/xtcp',
+      name: 'ProxiesXTCP',
+      component: ProxiesXTCP,
+    },
+    {
+      path: '/client/list',
+      name: 'ClientList',
+      component: ClientList,
     },
   ],
 })
