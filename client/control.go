@@ -16,17 +16,23 @@ package client
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net"
+	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/fatedier/frp/client/proxy"
 	"github.com/fatedier/frp/client/visitor"
 	"github.com/fatedier/frp/pkg/auth"
+	"github.com/fatedier/frp/pkg/config"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
+	"github.com/fatedier/frp/pkg/config/v1/validation"
 	"github.com/fatedier/frp/pkg/msg"
 	"github.com/fatedier/frp/pkg/transport"
 	netpkg "github.com/fatedier/frp/pkg/util/net"
+	"github.com/fatedier/frp/pkg/util/util"
 	"github.com/fatedier/frp/pkg/util/wait"
 	"github.com/fatedier/frp/pkg/util/xlog"
 	"github.com/fatedier/frp/pkg/vnet"
@@ -78,6 +84,8 @@ type Control struct {
 	// msgDispatcher is a wrapper for control connection.
 	// It provides a channel for sending messages, and you can register handlers to process messages based on their respective types.
 	msgDispatcher *msg.Dispatcher
+
+	svr *Service
 }
 
 func NewControl(ctx context.Context, sessionCtx *SessionContext) (*Control, error) {
@@ -120,6 +128,11 @@ func (ctl *Control) Run(proxyCfgs []v1.ProxyConfigurer, visitorCfgs []v1.Visitor
 
 func (ctl *Control) SetInWorkConnCallback(cb func(*v1.ProxyBaseConfig, net.Conn, *msg.StartWorkConn) bool) {
 	ctl.pm.SetInWorkConnCallback(cb)
+}
+
+// 设置control的service
+func (ctl *Control) SetService(svr *Service) {
+	ctl.svr = svr
 }
 
 func (ctl *Control) handleReqWorkConn(_ msg.Message) {
@@ -232,6 +245,9 @@ func (ctl *Control) registerMsgHandlers() {
 	ctl.msgDispatcher.RegisterHandler(&msg.NewProxyResp{}, ctl.handleNewProxyResp)
 	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleResp{}, ctl.handleNatHoleResp)
 	ctl.msgDispatcher.RegisterHandler(&msg.Pong{}, ctl.handlePong)
+
+	ctl.msgDispatcher.RegisterHandler(&msg.NewProxy{}, ctl.handleCreateTCPProxy)
+	ctl.msgDispatcher.RegisterHandler(&msg.CmdRequest{}, msg.AsyncHandler(ctl.handleCmdRequest))
 }
 
 // heartbeatWorker sends heartbeat to server and check heartbeat timeout.
@@ -293,4 +309,100 @@ func (ctl *Control) UpdateAllConfigurer(proxyCfgs []v1.ProxyConfigurer, visitorC
 	ctl.vm.UpdateAll(visitorCfgs)
 	ctl.pm.UpdateAll(proxyCfgs)
 	return nil
+}
+
+// 接收服务端发送过来的消息，并创建新的链接
+func (ctl *Control) handleCreateTCPProxy(m msg.Message) {
+	xl := ctl.xl
+	inMsg := m.(*msg.NewProxy)
+
+	inMsg.ProxyType = util.EmptyOr(inMsg.ProxyType, string(v1.ProxyTypeTCP))
+
+	configurer := v1.NewProxyConfigurerByType(v1.ProxyType(inMsg.ProxyType))
+	if configurer == nil {
+		log.Printf("handleCreateTCPProxy() unknown proxy type: %s", inMsg.ProxyType)
+	}
+
+	configurer.UnmarshalFromMsg(inMsg)
+	configurer.Complete("")
+
+	ctl.pm.UpdateOne(configurer)
+
+	xl.Debugf("receive new proxy from server,localip: %s, localport: %d", inMsg.LocalIP, inMsg.LocalPort)
+
+	// // strictConfigMode := true
+	// client := clientsdk.New("127.0.0.1", 7400)
+	// client.SetAuth("admin", "123456")
+	// ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// defer cancel()
+	// if text, err := client.GetConfig(ctx); err != nil {
+	// 	fmt.Println("handleCreateTCPProxy reload success")
+	// } else {
+	// 	fmt.Println("handleCreateTCPProxy reload success")
+	// 	fmt.Println(text)
+	// }
+}
+
+func (ctl *Control) handleCmdRequest(reqmsg msg.Message) {
+	xl := ctl.xl
+
+	cmdreq := reqmsg.(*msg.CmdRequest)
+	action := cmdreq.Action
+	params := cmdreq.Params
+	xl.Debugf("receive cmd request from server, action: %s, params: %v, transaction_id: %s",
+		action, params, cmdreq.TransactionID)
+	xl.Debugf("ctl.svr.configFilePath: %s", ctl.svr.configFilePath)
+
+	// 准备响应
+	msg_resp := &msg.CmdResponse{
+		TransactionID: cmdreq.TransactionID, // 返回相同的 TransactionID
+	}
+
+	switch cmdreq.Action {
+	case "get_frpc_config":
+		// FilePath := "E:\\go_test_projects\\frp_src\\frp-dev\\conf\\frpc_tt.toml"
+		content, err := os.ReadFile(ctl.svr.configFilePath)
+		if err != nil {
+			msg_resp.Error = err.Error()
+		} else {
+			msg_resp.Result = string(content)
+		}
+	case "set_frpc_config":
+		// FilePath := "E:\\go_test_projects\\frp_src\\frp-dev\\conf\\frpc_tt.toml"
+		content := params[0]
+		err := os.WriteFile(ctl.svr.configFilePath, []byte(content), 0644)
+		if err != nil {
+			msg_resp.Error = err.Error()
+		} else {
+			msg_resp.Result = "success"
+		}
+	case "reload_frpc_config":
+		cliCfg, proxyCfgs, visitorCfgs, _, err := config.LoadClientConfig(ctl.svr.configFilePath, true)
+		if err != nil {
+			msg_resp.Error = fmt.Sprintf("reload frpc proxy config error: %s", err.Error())
+		} else {
+			if _, err := validation.ValidateAllClientConfig(cliCfg, proxyCfgs, visitorCfgs, ctl.svr.unsafeFeatures); err != nil {
+				msg_resp.Error = fmt.Sprintf("reload frpc proxy config error: %s", err.Error())
+			} else {
+				if err := ctl.svr.UpdateAllConfigurer(proxyCfgs, visitorCfgs); err != nil {
+					msg_resp.Error = fmt.Sprintf("reload frpc proxy config error: %s", err.Error())
+				} else {
+					xl.Debugf("success reload_frpc_config")
+				}
+			}
+		}
+		if msg_resp.Error != "" {
+			xl.Errorf("reload frpc proxy config error: %s", msg_resp.Error)
+		}
+
+	default:
+		msg_resp.Error = "unknown action: " + cmdreq.Action
+	}
+
+	// 通过控制连接发送响应（不需要创建新的工作连接）
+	if err := ctl.msgTransporter.Send(msg_resp); err != nil {
+		xl.Errorf("send cmd response error: %v", err)
+	} else {
+		xl.Debugf("send cmd response success, transaction_id: %s", msg_resp.TransactionID)
+	}
 }

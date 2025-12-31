@@ -20,7 +20,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"os/user"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -259,6 +262,60 @@ func (svr *Service) keepControllerWorking() {
 	), true, svr.ctx.Done())
 }
 
+func getSystemUUID() (string, error) {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "windows":
+		// Windows: 使用 wmic 命令
+		cmd = exec.Command("wmic", "csproduct", "get", "UUID")
+	case "linux":
+		// Linux: 读取 DMI 信息
+		cmd = exec.Command("cat", "/sys/class/dmi/id/product_uuid")
+	case "darwin":
+		// macOS: 使用 system_profiler
+		cmd = exec.Command("system_profiler", "SPHardwareDataType")
+	default:
+		return "", fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	// 处理输出
+	uuid := strings.TrimSpace(string(output))
+
+	// Windows 需要特殊处理输出格式
+	if runtime.GOOS == "windows" {
+		lines := strings.Split(uuid, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.Contains(line, "UUID") {
+				uuid = line
+				break
+			}
+		}
+	}
+
+	// macOS 需要从输出中提取 UUID
+	if runtime.GOOS == "darwin" {
+		lines := strings.Split(uuid, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "Hardware UUID") {
+				parts := strings.Split(line, ":")
+				if len(parts) > 1 {
+					uuid = strings.TrimSpace(parts[1])
+				}
+				break
+			}
+		}
+	}
+
+	return uuid, nil
+}
+
 // login creates a connection to frps and registers it self as a client
 // conn: control connection
 // session: if it's not nil, using tcp mux
@@ -280,9 +337,15 @@ func (svr *Service) login() (conn net.Conn, connector Connector, err error) {
 		return
 	}
 
+	sys_uuid, _ := getSystemUUID()
+	host_name, _ := os.Hostname()
+	os_user, _ := user.Current()
 	loginMsg := &msg.Login{
 		Arch:      runtime.GOARCH,
 		Os:        runtime.GOOS,
+		UUID:      sys_uuid,
+		HostName:  host_name,
+		OSUser:    os_user.Username,
 		PoolCount: svr.common.Transport.PoolCount,
 		User:      svr.common.User,
 		Version:   version.Full(),
@@ -359,6 +422,7 @@ func (svr *Service) loopLoginUntilSuccess(maxInterval time.Duration, firstLoginE
 			xl.Errorf("new control error: %v", err)
 			return false, err
 		}
+		ctl.SetService(svr) // 设置Control的Service
 		ctl.SetInWorkConnCallback(svr.handleWorkConnCb)
 
 		ctl.Run(proxyCfgs, visitorCfgs)

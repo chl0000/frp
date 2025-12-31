@@ -211,7 +211,7 @@ func (svr *Service) apiStatus(w http.ResponseWriter, _ *http.Request) {
 		res[status.Type] = append(res[status.Type], NewProxyStatusResp(status, svr.common.ServerAddr))
 	}
 
-	// 获取visitor
+	// fetch visitor add changliang 2025-11-21
 	vs := ctl.vm.GetAllVisitorStatus()
 	log.Infof("vs count:%d", len(vs))
 	for _, status := range vs {
