@@ -16,9 +16,13 @@ package server
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -26,9 +30,11 @@ import (
 	"github.com/fatedier/frp/pkg/config/types"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/metrics/mem"
+	"github.com/fatedier/frp/pkg/msg"
 	httppkg "github.com/fatedier/frp/pkg/util/http"
 	"github.com/fatedier/frp/pkg/util/log"
 	netpkg "github.com/fatedier/frp/pkg/util/net"
+	"github.com/fatedier/frp/pkg/util/util"
 	"github.com/fatedier/frp/pkg/util/version"
 )
 
@@ -54,6 +60,16 @@ func (svr *Service) registerRouteHandlers(helper *httppkg.RouterRegisterHelper) 
 	subRouter.HandleFunc("/api/proxy/{type}/{name}", svr.apiProxyByTypeAndName).Methods("GET")
 	subRouter.HandleFunc("/api/traffic/{name}", svr.apiProxyTraffic).Methods("GET")
 	subRouter.HandleFunc("/api/proxies", svr.deleteProxies).Methods("DELETE")
+
+	// 启用了webservice的通过frps的web段设置frps的代理的状态
+	if svr.cfg.WebServer.EnableCreateClientProxy {
+		log.Infof("enable create client proxy")
+		// subRouter.HandleFunc("/api/create_proxy", svr.createClientProxies).Methods("POST")
+
+		subRouter.HandleFunc("/api/get_clients", svr.getClientList).Methods("GET")
+		subRouter.HandleFunc("/api/get_fprc_config", svr.getFrpcConfig).Methods("GET")
+		subRouter.HandleFunc("/api/update_fprc_config", svr.putFrpcConfig).Methods("PUT")
+	}
 
 	// view
 	subRouter.Handle("/favicon.ico", http.FileServer(helper.AssetsFS)).Methods("GET")
@@ -415,4 +431,366 @@ func (svr *Service) deleteProxies(w http.ResponseWriter, r *http.Request) {
 	}
 	cleared, total := mem.StatsCollector.ClearOfflineProxies()
 	log.Infof("cleared [%d] offline proxies, total [%d] proxies", cleared, total)
+}
+
+// 获取客户端的配置文件
+func (svr *Service) getClientConfig(client_RunID string) (conf_text string, err error) {
+	if ctl, ok := svr.ctlManager.GetByID(client_RunID); ok {
+		transactionID, _ := util.RandID()
+		msg_cmdreq := msg.CmdRequest{
+			Action:        "get_frpc_config",
+			TransactionID: transactionID,
+			NewWorkConn:   msg.NewWorkConn{RunID: ctl.runID},
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		respMsg, err := ctl.msgTransporter.Do(
+			ctx,
+			&msg_cmdreq,
+			transactionID,           // laneKey
+			msg.TypeNameCmdResponse, // recvMsgType
+		)
+
+		if err != nil {
+			return "", fmt.Errorf("can not get client response: %v", err)
+		} else {
+			if cmdResp, ok := respMsg.(*msg.CmdResponse); ok {
+				return cmdResp.Result, nil
+			} else {
+				return "", fmt.Errorf("respMsg is not cmdResp:%v", err)
+			}
+		}
+	} else {
+		return "", fmt.Errorf("client [%s] not found", client_RunID)
+	}
+}
+
+// 设置客户端的配置文件
+func (svr *Service) setClientConfig(client_RunID, conf_text string) error {
+	if ctl, ok := svr.ctlManager.GetByID(client_RunID); ok {
+		transactionID, _ := util.RandID()
+		msg_cmdreq := msg.CmdRequest{
+			Action:        "set_frpc_config",
+			Params:        []string{conf_text},
+			TransactionID: transactionID,
+			NewWorkConn:   msg.NewWorkConn{RunID: ctl.runID},
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		respMsg, err := ctl.msgTransporter.Do(
+			ctx,
+			&msg_cmdreq,
+			transactionID,           // laneKey
+			msg.TypeNameCmdResponse, // recvMsgType
+		)
+
+		if err != nil {
+			return fmt.Errorf("can not get client response: %v", err)
+		} else {
+			if cmdResp, ok := respMsg.(*msg.CmdResponse); ok {
+				if cmdResp.Error == "" {
+					return nil
+				} else {
+					return fmt.Errorf("set client config error: %s", cmdResp.Error)
+				}
+			} else {
+				return fmt.Errorf("respMsg is not cmdResp:%v", err)
+			}
+		}
+	} else {
+		return fmt.Errorf("client [%s] not found", client_RunID)
+	}
+}
+
+// 重新加载客户端的配置文件
+func (svr *Service) reloadClientConfig(client_RunID string) error {
+	if ctl, ok := svr.ctlManager.GetByID(client_RunID); ok {
+		transactionID, _ := util.RandID()
+		msg_cmdreq := msg.CmdRequest{
+			Action:        "reload_frpc_config",
+			TransactionID: transactionID,
+			NewWorkConn:   msg.NewWorkConn{RunID: ctl.runID},
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		respMsg, err := ctl.msgTransporter.Do(
+			ctx,
+			&msg_cmdreq,
+			transactionID,           // laneKey
+			msg.TypeNameCmdResponse, // recvMsgType
+		)
+
+		if err != nil {
+			return fmt.Errorf("can not get client response: %v", err)
+		} else {
+			if cmdResp, ok := respMsg.(*msg.CmdResponse); ok {
+				if cmdResp.Error == "" {
+					return nil
+				} else {
+					return fmt.Errorf("reload client config error: %s", cmdResp.Error)
+				}
+			} else {
+				return fmt.Errorf("respMsg is not cmdResp:%v", err)
+			}
+		}
+	} else {
+		return fmt.Errorf("client [%s] not found", client_RunID)
+	}
+}
+
+// // 创建frpc的新的proxy
+// func (svr *Service) createClientProxies(w http.ResponseWriter, r *http.Request) {
+// 	res := GeneralResponse{Code: 200}
+
+// 	log.Infof("http request: [%s] [%s]", r.Method, r.URL.Path)
+// 	defer func() {
+// 		log.Infof("http response [%s]: code [%d]", r.URL.Path, res.Code)
+// 		w.Header().Set("Content-Type", "application/json")
+// 		w.WriteHeader(res.Code)
+// 		if len(res.Msg) > 0 {
+// 			_, _ = w.Write([]byte(res.Msg))
+// 		}
+// 	}()
+
+// 	// 只处理POST请求
+// 	if r.Method != "POST" {
+// 		res.Code = 405
+// 		res.Msg = "Method not allowed"
+// 		return
+// 	}
+
+// 	// 读取请求体
+// 	body, err := io.ReadAll(r.Body)
+// 	if err != nil {
+// 		res.Code = 400
+// 		res.Msg = "Failed to read request body: " + err.Error()
+// 		return
+// 	}
+// 	defer r.Body.Close()
+
+// 	log.Infof("request body: %s", string(body))
+
+// 	// 定义请求体结构
+// 	type CreateProxyRequest struct {
+// 		Type        string `json:"type"`
+// 		Name        string `json:"name"`
+// 		Description string `json:"description"`
+// 	}
+
+// 	var req CreateProxyRequest
+// 	if err := json.Unmarshal(body, &req); err != nil {
+// 		res.Code = 400
+// 		res.Msg = "Failed to parse JSON: " + err.Error()
+// 		return
+// 	}
+
+// 	// 验证必需字段
+// 	if req.Type == "" || req.Name == "" {
+// 		res.Code = 400
+// 		res.Msg = "type and name are required"
+// 		return
+// 	}
+
+// 	// 记录请求信息
+// 	log.Infof("Creating proxy: type=[%s], name=[%s], description=[%s]",
+// 		req.Type, req.Name, req.Description)
+
+// 	// TODO: 这里实现实际的代理创建逻辑
+// 	// 例如：调用 frps 的内部 API 创建代理
+// 	// 或者通过 Plugin 系统处理
+
+// 	log.Infof("----svr.ctlManager:%v", svr.ctlManager)
+// 	// log.Infof("----svr.pxyManager:%v", svr.pxyManager)
+// 	// // svr.pxyManager.Add(req.Type, req.Name, req.Description)
+// 	// // 模拟创建成功（实际实现需要根据你的业务逻辑）
+// 	// tcp_proxy := v1.TCPProxyConfig{ProxyBaseConfig: v1.ProxyBaseConfig{Name: "new_ssh_test", Type: "tcp", ProxyBackend: v1.ProxyBackend{LocalIP: "10.125.237.73", LocalPort: 22}}, RemotePort: 12134}
+
+// 	// for _, ctl := range svr.ctlManager.GetAll() {
+// 	// 	if ctl.loginMsg.User == "iei_pc" {
+// 	// 		var msg msg.NewProxy
+// 	// 		tcp_proxy.MarshalToMsg(&msg)
+// 	// 		if !strings.HasPrefix(msg.ProxyName, fmt.Sprintf("%s.", ctl.loginMsg.User)) {
+// 	// 			msg.ProxyName = fmt.Sprintf("%s.%s", ctl.loginMsg.User, msg.ProxyName)
+// 	// 		}
+// 	// 		err = ctl.SendMessage(&msg)
+// 	// 		if err != nil {
+// 	// 			log.Errorf("SendMessage error: %v", err)
+// 	// 		}
+// 	// 	}
+// 	// }
+
+// 	// // "062bea758db53df4"
+// 	// // for _, ctl := range svr.ctlManager {
+// 	// // 	ctl.AddProxy(&tcp_proxy)
+// 	// // }
+
+// 	// log.Infof("Proxy [%s] created successfully", req.Name)
+
+// 	for _, ctl := range svr.ctlManager.GetAll() {
+// 		log.Infof("ctl.runID:%s, UUID:%s, HostName:%s, OS User:%s", ctl.runID, ctl.loginMsg.UUID, ctl.loginMsg.HostName, ctl.loginMsg.OSUser)
+// 		config_text, err := svr.getClientConfig(ctl.runID)
+// 		if err != nil {
+// 			result := map[string]interface{}{
+// 				"success": false,
+// 				"message": "获取client配置失败" + err.Error(),
+// 				"data": map[string]interface{}{
+// 					"type":        req.Type,
+// 					"name":        req.Name,
+// 					"description": req.Description,
+// 				},
+// 			}
+// 			responseData, _ := json.Marshal(result)
+// 			res.Msg = string(responseData)
+// 			return
+// 		} else {
+// 			config_text += fmt.Sprintf("\n# add one %s", time.Now().Format("2006-01-02 15:04:05"))
+// 			err2 := svr.setClientConfig(ctl.runID, config_text)
+// 			if err2 != nil {
+// 				log.Errorf("setClientConfig error: %v", err2)
+// 			}
+// 			err3 := svr.reloadClientConfig(ctl.runID)
+// 			if err3 != nil {
+// 				log.Errorf("reloadClientConfig error: %v", err3)
+// 			}
+// 			result := map[string]interface{}{
+// 				"success": true,
+// 				"message": "更新client配置成功",
+// 				"data": map[string]interface{}{
+// 					"type":        req.Type,
+// 					"name":        req.Name,
+// 					"description": config_text,
+// 				},
+// 			}
+// 			responseData, _ := json.Marshal(result)
+// 			res.Msg = string(responseData)
+// 			return
+// 		}
+// 	}
+
+// 	// 返回成功响应
+// 	result := map[string]interface{}{
+// 		"success": false,
+// 		"message": "没有处理请求呢",
+// 		"data": map[string]interface{}{
+// 			"type":        req.Type,
+// 			"name":        req.Name,
+// 			"description": req.Description,
+// 		},
+// 	}
+
+// 	responseData, _ := json.Marshal(result)
+// 	res.Msg = string(responseData)
+// }
+
+// 获取客户端列表
+func (svr *Service) getClientList(w http.ResponseWriter, r *http.Request) {
+	res := GeneralResponse{Code: 200}
+	defer func() {
+		log.Infof("http response [%s]: code [%d]", r.URL.Path, res.Code)
+		w.WriteHeader(res.Code)
+		if len(res.Msg) > 0 {
+			_, _ = w.Write([]byte(res.Msg))
+		}
+	}()
+	log.Infof("http request: [%s]", r.URL.Path)
+
+	var client_login_info []*msg.Login
+	for _, ctl := range svr.ctlManager.GetAll() {
+
+		client_login_info = append(client_login_info, ctl.loginMsg)
+	}
+
+	buf, _ := json.Marshal(&client_login_info)
+	res.Msg = string(buf)
+}
+
+// 根据run_id获取客户端的配置文件
+func (svr *Service) getFrpcConfig(w http.ResponseWriter, r *http.Request) {
+	res := GeneralResponse{Code: 200}
+
+	log.Infof("http get request [/api/config]")
+	defer func() {
+		log.Infof("http get response [/api/config], code [%d]", res.Code)
+		w.WriteHeader(res.Code)
+		if len(res.Msg) > 0 {
+			_, _ = w.Write([]byte(res.Msg))
+		}
+	}()
+
+	run_id := r.URL.Query().Get("run_id")
+	if run_id == "" {
+		res.Code = 400
+		res.Msg = "run_id is empty"
+		log.Warnf("%s", res.Msg)
+		return
+	}
+
+	config_text, err := svr.getClientConfig(run_id)
+	if err != nil {
+		res.Code = 400
+		res.Msg = err.Error()
+		log.Warnf("load frpc config file error: %s", res.Msg)
+		return
+	}
+	res.Msg = string(config_text)
+}
+
+type putFrpcConfig struct {
+	RunID         string `json:"run_id"`
+	ConfigContent string `json:"config_content"`
+}
+
+func (svr *Service) putFrpcConfig(w http.ResponseWriter, r *http.Request) {
+	res := GeneralResponse{Code: 200}
+
+	log.Infof("http put request [/api/config]")
+	defer func() {
+		log.Infof("http put response [/api/config], code [%d]", res.Code)
+		w.WriteHeader(res.Code)
+		if len(res.Msg) > 0 {
+			_, _ = w.Write([]byte(res.Msg))
+		}
+	}()
+
+	// 解析请求体中的 JSON
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		res.Code = 400
+		res.Msg = fmt.Sprintf("read request body error: %v", err)
+		log.Warnf("%s", res.Msg)
+		return
+	}
+	defer r.Body.Close()
+
+	if len(body) == 0 {
+		res.Code = 400
+		res.Msg = "body can't be empty"
+		log.Warnf("%s", res.Msg)
+		return
+	}
+
+	// 解析 JSON 格式的请求体
+	var req putFrpcConfig
+	if err := json.Unmarshal(body, &req); err != nil {
+		res.Code = 400
+		res.Msg = fmt.Sprintf("parse JSON error: %v", err)
+		log.Warnf("%s", res.Msg)
+		return
+	}
+
+	// 使用 setClientConfig 方法设置客户端配置
+	if err := svr.setClientConfig(req.RunID, req.ConfigContent); err != nil {
+		res.Code = 400
+		res.Msg = fmt.Sprintf("set client config error: %v", err)
+		log.Warnf("%s", res.Msg)
+		return
+	}
+
+	// 重新加载客户端配置
+	if err := svr.reloadClientConfig(req.RunID); err != nil {
+		log.Warnf("reload client config warning: %v", err)
+		// 不返回错误，只是记录警告
+	}
+
+	res.Msg = "frpc config update success"
 }

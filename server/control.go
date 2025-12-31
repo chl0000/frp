@@ -84,6 +84,12 @@ func (cm *ControlManager) GetByID(runID string) (ctl *Control, ok bool) {
 	return
 }
 
+func (cm *ControlManager) GetAll() map[string]*Control {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.ctlsByRunID
+}
+
 func (cm *ControlManager) Close() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -365,6 +371,15 @@ func (ctl *Control) registerMsgHandlers() {
 	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleClient{}, msg.AsyncHandler(ctl.handleNatHoleClient))
 	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleReport{}, msg.AsyncHandler(ctl.handleNatHoleReport))
 	ctl.msgDispatcher.RegisterHandler(&msg.CloseProxy{}, ctl.handleCloseProxy)
+
+	// 添加这个来调试
+	ctl.msgDispatcher.RegisterHandler(&msg.CmdResponse{}, func(m msg.Message) {
+		if cmdResp, ok := m.(*msg.CmdResponse); ok {
+			laneKey := cmdResp.TransactionID
+			// 转发给 msgTransporter，Do() 方法才能收到响应
+			ctl.msgTransporter.DispatchWithType(m, msg.TypeNameCmdResponse, laneKey)
+		}
+	})
 }
 
 func (ctl *Control) handleNewProxy(m msg.Message) {
@@ -561,4 +576,8 @@ func (ctl *Control) CloseProxy(closeMsg *msg.CloseProxy) (err error) {
 		_ = ctl.pluginManager.CloseProxy(notifyContent)
 	}()
 	return
+}
+
+func (ctl *Control) SendMessage(m msg.Message) error {
+	return ctl.msgDispatcher.Send(m)
 }
