@@ -177,3 +177,23 @@ func (pm *Manager) UpdateAll(proxyCfgs []v1.ProxyConfigurer) {
 		xl.Infof("proxy added: %s", addPxyNames)
 	}
 }
+
+// 增加一个代理
+func (pm *Manager) UpdateOne(cfg v1.ProxyConfigurer) {
+	xl := xlog.FromContextSafe(pm.ctx)
+	addPxyNames := make([]string, 0)
+	name := cfg.GetBaseConfig().Name
+	if _, ok := pm.proxies[name]; !ok {
+		pxy := NewWrapper(pm.ctx, cfg, pm.clientCfg, pm.HandleEvent, pm.msgTransporter, pm.vnetController)
+		if pm.inWorkConnCallback != nil {
+			pxy.SetInWorkConnCallback(pm.inWorkConnCallback)
+		}
+		pm.proxies[name] = pxy
+		addPxyNames = append(addPxyNames, name)
+
+		pxy.Start()
+	}
+	if len(addPxyNames) > 0 {
+		xl.Infof("proxy added: %s", addPxyNames)
+	}
+}
