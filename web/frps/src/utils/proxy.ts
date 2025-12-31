@@ -13,16 +13,20 @@ class BaseProxy {
   clientVersion: string
   addr: string
   port: number
+  localIP: string | null
+  localPort: number | null
 
   customDomains: string
   hostHeaderRewrite: string
-  locations: string
-  subdomain: string
+  locations: string | null
+  subdomain: string | null
 
   constructor(proxyStats: any) {
     this.name = proxyStats.name
     this.type = ''
     this.annotations = new Map<string, string>()
+    this.localIP = null
+    this.localPort = null
     if (proxyStats.conf?.annotations) {
       for (const key in proxyStats.conf.annotations) {
         this.annotations.set(key, proxyStats.conf.annotations[key])
@@ -47,8 +51,19 @@ class BaseProxy {
     this.port = 0
     this.customDomains = ''
     this.hostHeaderRewrite = ''
-    this.locations = ''
-    this.subdomain = ''
+    if (proxyStats.conf != null){
+      if (proxyStats.conf.localIP !== undefined) {
+        this.localIP = proxyStats.conf.localIP
+      }
+      if (proxyStats.conf.localPort !== undefined) {
+        this.localPort = proxyStats.conf.localPort
+      }
+    }else{
+      this.localIP = null   
+      this.localPort = null
+    }
+    this.locations = null
+    this.subdomain = null
   }
 }
 
@@ -59,6 +74,8 @@ class TCPProxy extends BaseProxy {
     if (proxyStats.conf != null) {
       this.addr = ':' + proxyStats.conf.remotePort
       this.port = proxyStats.conf.remotePort
+      this.localIP = proxyStats.conf.localIP
+      this.localPort = proxyStats.conf.localPort
     } else {
       this.addr = ''
       this.port = 0
@@ -73,6 +90,8 @@ class UDPProxy extends BaseProxy {
     if (proxyStats.conf != null) {
       this.addr = ':' + proxyStats.conf.remotePort
       this.port = proxyStats.conf.remotePort
+      this.localIP = proxyStats.conf.localIP
+      this.localPort = proxyStats.conf.localPort
     } else {
       this.addr = ''
       this.port = 0
@@ -133,16 +152,47 @@ class TCPMuxProxy extends BaseProxy {
 }
 
 class STCPProxy extends BaseProxy {
+  secretKey: any
+  allowUsers: any
   constructor(proxyStats: any) {
     super(proxyStats)
     this.type = 'stcp'
+    if (proxyStats.conf && proxyStats.conf.secretKey) {
+      this.secretKey = proxyStats.conf.secretKey
+    }
+    if (proxyStats.conf && proxyStats.conf.allowUsers) {
+      this.allowUsers = proxyStats.conf.allowUsers
+    }
   }
 }
 
 class SUDPProxy extends BaseProxy {
+  secretKey: any
+  allowUsers: any
   constructor(proxyStats: any) {
     super(proxyStats)
     this.type = 'sudp'
+    if (proxyStats.conf && proxyStats.conf.secretKey) {
+      this.secretKey = proxyStats.conf.secretKey
+    }
+    if (proxyStats.conf && proxyStats.conf.allowUsers) {
+      this.allowUsers = proxyStats.conf.allowUsers
+    }
+  }
+}
+
+class XTCPProxy extends BaseProxy {
+  secretKey: any
+  allowUsers: any
+  constructor(proxyStats: any) {
+    super(proxyStats)
+    this.type = 'xtcp'
+    if (proxyStats.conf && proxyStats.conf.secretKey) {
+      this.secretKey = proxyStats.conf.secretKey
+    }
+    if (proxyStats.conf && proxyStats.conf.allowUsers) {
+      this.allowUsers = proxyStats.conf.allowUsers
+    }
   }
 }
 
@@ -155,4 +205,5 @@ export {
   HTTPSProxy,
   STCPProxy,
   SUDPProxy,
+  XTCPProxy,
 }
